@@ -20,8 +20,8 @@ pub mod downloader {
     #[tokio::main(flavor = "current_thread")]
     pub async fn download_file_as_bytes(url: &str, message: &str) -> Vec<u8> {
         // Get file from web
-        let mut response = Client::new().get(url).send().await.unwrap();
-        let total_size = response.content_length().unwrap();
+        let response = Client::new().get(url).send().await.unwrap();
+        let total_size = response.content_length().unwrap_or(0);
 
         // Pretty progress bar
         let pb = ProgressBar::new(total_size);
@@ -41,15 +41,28 @@ pub mod downloader {
         );
         pb.set_message(msg.clone());
 
-        // Read stream into bytes
-        let mut downloaded: u64 = 0;
-        let mut bytes: Vec<u8> = Vec::with_capacity(total_size as usize);
-        while let Some(chunk) = response.chunk().await.unwrap() {
-            let num_bytes = bytes.write(&chunk).unwrap();
-            let new = std::cmp::min(downloaded + (num_bytes as u64), total_size);
-            downloaded = new;
-            pb.set_position(new);
-        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let bytes = {
+            // Read stream into bytes for non-WASM targets
+            let mut downloaded: u64 = 0;
+            let mut bytes: Vec<u8> = Vec::with_capacity(total_size as usize);
+            while let Some(chunk) = response.chunk().await.unwrap() {
+                let num_bytes = bytes.write(&chunk).unwrap();
+                let new = std::cmp::min(downloaded + (num_bytes as u64), total_size);
+                downloaded = new;
+                pb.set_position(new);
+            }
+            bytes
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let bytes = {
+            // Read entire body at once for WASM targets
+            let bytes = response.bytes().await.unwrap().to_vec();
+            pb.set_position(total_size);
+            bytes
+        };
+
         pb.finish_with_message(msg);
 
         bytes
