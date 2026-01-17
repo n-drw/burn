@@ -257,6 +257,7 @@ define_node_enum! {
     // MATRIX OPERATIONS
     MatMul => matmul::MatMulNode,
     MatMulInteger => matmulinteger::MatMulIntegerNode,
+    MatMulNBits => matmul_nbits::MatMulNBitsNode,
     Gemm => gemm::GemmNode,
 
     // CONVOLUTION & POOLING
@@ -332,7 +333,7 @@ define_node_enum! {
     ConvTranspose => unsupported::ConvTransposeNode,
     Dft => unsupported::DftNode,
     DeformConv => unsupported::DeformConvNode,
-    DequantizeLinear => unsupported::DequantizeLinearNode,
+    DequantizeLinear => dequantize_linear::DequantizeLinearNode,
     Det => unsupported::DetNode,
     DynamicQuantizeLinear => unsupported::DynamicQuantizeLinearNode,
     Einsum => unsupported::EinsumNode,

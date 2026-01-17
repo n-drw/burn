@@ -111,7 +111,7 @@ impl NodeCodegen for onnx_ir::node::scan_node::ScanNode {
 
         for collector in &scan_output_collectors {
             init_stmts.extend(quote! {
-                let mut #collector = alloc::vec::Vec::new();
+                let mut #collector = Vec::new();
             });
         }
 

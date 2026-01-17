@@ -103,6 +103,18 @@ pub fn sanitize_name(name: &str) -> String {
 
 /// Convert ONNX protobuf DataType to DType
 pub fn element_type_from_proto(dt_i32: i32) -> Result<DType, String> {
+    // ONNX opset 21 added INT4 (22) and UINT4 (21) types
+    // These are packed 4-bit values (2 per byte) stored as raw bytes.
+    // The scale/zero_point are separate tensors in ONNX's DequantizeLinear,
+    // so we load the packed data as U8 and let DequantizeLinear handle unpacking.
+    const ONNX_UINT4: i32 = 21;
+    const ONNX_INT4: i32 = 22;
+    
+    if dt_i32 == ONNX_INT4 || dt_i32 == ONNX_UINT4 {
+        // Store as raw bytes - DequantizeLinear will unpack at runtime
+        return Ok(DType::U8);
+    }
+    
     match DT::from_i32(dt_i32).ok_or_else(|| format!("unknown dtype {}", dt_i32))? {
         DT::FLOAT => Ok(DType::F32),
         DT::DOUBLE => Ok(DType::F64),
@@ -334,8 +346,25 @@ pub fn tensor_data_ref_from_proto(
     tensor: TensorProto,
     base_path: Option<&Path>,
 ) -> Result<TensorDataRef, ParseError> {
-    let shape = convert_shape(tensor.dims.clone());
+    let mut shape = convert_shape(tensor.dims.clone());
     let elem = element_type_from_proto(tensor.data_type).map_err(ParseError::VariantNotFound)?;
+    
+    // ONNX INT4/UINT4 (data_type 21/22) are packed 2 values per byte.
+    // Adjust shape to reflect the packed byte count instead of logical element count.
+    const ONNX_UINT4: i32 = 21;
+    const ONNX_INT4: i32 = 22;
+    if tensor.data_type == ONNX_INT4 || tensor.data_type == ONNX_UINT4 {
+        // Halve the last dimension since 2 INT4 values fit in 1 byte
+        if let Some(last) = shape.last_mut() {
+            *last = (*last + 1) / 2; // Round up for odd sizes
+        }
+        log::debug!(
+            "INT4 tensor '{}': adjusted shape from {:?} to {:?} for packed storage",
+            tensor.name,
+            convert_shape(tensor.dims.clone()),
+            shape
+        );
+    }
 
     // Check if this tensor uses external data storage
     if tensor.data_location.enum_value() == Ok(DataLocation::EXTERNAL) {
@@ -575,6 +604,72 @@ impl TryFrom<AttributeProto> for AttributeValue {
 /// Convert a vector of AttributeProto to a HashMap of AttributeValue
 /// Skips GRAPH and GRAPHS attributes as they need special handling with opset version
 pub fn convert_vec_attrs_proto(attrs: Vec<AttributeProto>) -> Attributes {
+    convert_vec_attrs_proto_with_base_path(attrs, None)
+}
+
+/// Convert a single AttributeProto to AttributeValue with optional base_path for external data
+///
+/// This handles TENSOR attributes that may reference external data files.
+/// When `base_path` is provided, external data tensors are resolved relative to that directory.
+fn convert_attr_proto_with_base_path(
+    attr: AttributeProto,
+    base_path: Option<&Path>,
+) -> Result<AttributeValue, ParseError> {
+    let value = match attr.type_.unwrap() {
+        AttributeType::FLOAT => AttributeValue::Float32(attr.f),
+        AttributeType::INT => AttributeValue::Int64(attr.i),
+        AttributeType::STRING => AttributeValue::String(to_string(attr.s)),
+
+        // Handle tensor attributes with external data support
+        AttributeType::TENSOR => {
+            let tensor_proto = attr.t.unwrap();
+            let data_ref = tensor_data_ref_from_proto(tensor_proto, base_path)?;
+            AttributeValue::Tensor(data_ref.to_tensor_data())
+        }
+
+        // Graph attributes (used by If, Loop, Scan)
+        AttributeType::GRAPH => {
+            panic!(
+                "Graph attributes should be converted during node processing, not during proto conversion"
+            )
+        }
+        AttributeType::FLOATS => AttributeValue::Float32s(attr.floats),
+        AttributeType::INTS => AttributeValue::Int64s(attr.ints),
+        AttributeType::STRINGS => AttributeValue::Strings(to_string_vec(attr.strings)),
+        AttributeType::TENSORS => {
+            // Handle multiple tensors with external data support
+            let mut tensors = Vec::new();
+            for tensor_proto in attr.tensors {
+                let data_ref = tensor_data_ref_from_proto(tensor_proto, base_path)?;
+                tensors.push(data_ref.to_tensor_data());
+            }
+            AttributeValue::Tensors(tensors)
+        }
+        AttributeType::GRAPHS => {
+            panic!(
+                "Graphs attributes should be converted during node processing, not during proto conversion"
+            )
+        }
+        attribute_type => {
+            return Err(ParseError::VariantNotFound(format!("{attribute_type:?}")));
+        }
+    };
+
+    Ok(value)
+}
+
+/// Convert a vector of AttributeProto to a HashMap of AttributeValue with base_path support
+///
+/// This version supports external data resolution for TENSOR attributes.
+/// Skips GRAPH and GRAPHS attributes as they need special handling with opset version.
+///
+/// # Arguments
+/// * `attrs` - Vector of AttributeProto to convert
+/// * `base_path` - Optional base directory for resolving external tensor data paths
+pub fn convert_vec_attrs_proto_with_base_path(
+    attrs: Vec<AttributeProto>,
+    base_path: Option<&Path>,
+) -> Attributes {
     let mut result = Attributes::new();
     for attr in attrs {
         // Skip GRAPH/GRAPHS attributes - they'll be handled separately with opset version
@@ -583,7 +678,10 @@ pub fn convert_vec_attrs_proto(attrs: Vec<AttributeProto>) -> Attributes {
         {
             continue;
         }
-        result.insert(attr.name.clone(), AttributeValue::try_from(attr).unwrap());
+        result.insert(
+            attr.name.clone(),
+            convert_attr_proto_with_base_path(attr, base_path).unwrap(),
+        );
     }
     result
 }
@@ -610,7 +708,8 @@ pub fn convert_node_proto(node: &NodeProto, graph_data: &GraphState) -> RawNode 
         })
         .collect();
 
-    let attrs = convert_vec_attrs_proto(node.attribute.clone());
+    // Use base_path from graph_data for external data resolution in tensor attributes
+    let attrs = convert_vec_attrs_proto_with_base_path(node.attribute.clone(), graph_data.base_path());
 
     let node_type = NodeType::from_str(&node.op_type).expect("Unknown node type");
 

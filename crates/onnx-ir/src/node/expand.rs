@@ -121,6 +121,12 @@ impl NodeProcessor for ExpandProcessor {
             }
             ExpandConfig::Runtime(_) => {
                 // When the shape cannot be determined statically, infer the rank from the shape input
+                // Get input rank for fallback - Expand output rank >= input rank
+                let input_rank = match &node.inputs[0].ty {
+                    ArgType::Tensor(t) => t.rank,
+                    _ => 0,
+                };
+
                 let output_rank = match &node.inputs[1].ty {
                     ArgType::Shape(rank) => *rank,
                     ArgType::Tensor(tensor) => {
@@ -131,10 +137,22 @@ impl NodeProcessor for ExpandProcessor {
                             match &node.outputs[0].ty {
                                 ArgType::Tensor(TensorType { rank, .. }) if *rank > 0 => *rank,
                                 _ => {
-                                    return Err(ProcessError::Custom(format!(
-                                        "Cannot determine output rank for Expand node {} with fully dynamic shape tensor",
-                                        node.name
-                                    )));
+                                    // Fallback: use input rank as minimum output rank
+                                    // This is valid because Expand's output rank >= input rank
+                                    // (broadcasting can only add dimensions, not remove them)
+                                    if input_rank > 0 {
+                                        log::warn!(
+                                            "Expand node {}: using input rank {} as fallback for dynamic shape",
+                                            node.name,
+                                            input_rank
+                                        );
+                                        input_rank
+                                    } else {
+                                        return Err(ProcessError::Custom(format!(
+                                            "Cannot determine output rank for Expand node {} with fully dynamic shape tensor",
+                                            node.name
+                                        )));
+                                    }
                                 }
                             }
                         }

@@ -26,12 +26,26 @@ impl NodeCodegen for onnx_ir::node::constant::ConstantNode {
                 let shape = tensor_data.shape.to_tokens();
 
                 let (ty, init) = match &t.dtype {
-                    dtype if dtype.is_int() || dtype.is_uint() => (
+                    dtype if dtype.is_int() => (
                         quote! { burn::module::Param<Tensor<B, #rank, Int>> },
                         quote! {
                             let #name: burn::module::Param<Tensor<B, #rank, Int>> = burn::module::Param::uninitialized(
                                 burn::module::ParamId::new(),
                                 move |device, _require_grad| Tensor::<B, #rank, Int>::zeros(#shape, device),
+                                device.clone(),
+                                false,
+                                #shape.into(),
+                            );
+                        },
+                    ),
+                    // U8 tensors (used for quantized weights) are stored as float tensors
+                    // since they'll be converted via .float() in matmul_nbits
+                    dtype if dtype.is_uint() => (
+                        quote! { burn::module::Param<Tensor<B, #rank>> },
+                        quote! {
+                            let #name: burn::module::Param<Tensor<B, #rank>> = burn::module::Param::uninitialized(
+                                burn::module::ParamId::new(),
+                                move |device, _require_grad| Tensor::<B, #rank>::zeros(#shape, device),
                                 device.clone(),
                                 false,
                                 #shape.into(),
@@ -82,20 +96,59 @@ impl NodeCodegen for onnx_ir::node::constant::ConstantNode {
     }
 
     fn collect_snapshots(&self, field_name: &str) -> Vec<TensorSnapshot> {
-        use crate::burn::node_traits::create_lazy_snapshot;
+        use burn::module::ParamId;
+        use burn::tensor::{DType, TensorData};
+        use burn_store::TensorSnapshotError;
+        use std::rc::Rc;
 
         let output = self.outputs.first().unwrap();
 
         // Only collect snapshots for tensor constants (not scalars or shapes)
         match &output.ty {
-            ArgType::Tensor(_) => {
+            ArgType::Tensor(tensor_type) => {
                 if let Some(input) = self.inputs.first() {
-                    // Use the field name as the path since constants are stored as single params
-                    if let Some(snapshot) = create_lazy_snapshot(input, field_name, "Constant") {
-                        vec![snapshot]
+                    let dtype = tensor_type.dtype;
+                    let shape = tensor_type
+                        .static_shape
+                        .as_ref()
+                        .map(|s| s.to_vec())
+                        .unwrap_or_default();
+
+                    // For uint tensors (like U8 quantized weights), convert to float
+                    // since they'll be stored as float tensors in the model
+                    let (target_dtype, input_clone) = if dtype.is_uint() {
+                        (DType::F32, input.clone())
                     } else {
-                        vec![]
-                    }
+                        (dtype, input.clone())
+                    };
+
+                    let data_fn = Rc::new(move || -> Result<TensorData, TensorSnapshotError> {
+                        let data = input_clone.value().ok_or_else(|| {
+                            TensorSnapshotError::DataError(format!(
+                                "Failed to extract tensor data for '{}'",
+                                input_clone.name
+                            ))
+                        })?;
+                        
+                        // Convert U8 data to F32 if needed
+                        if dtype.is_uint() {
+                            Ok(data.convert::<f32>())
+                        } else {
+                            Ok(data)
+                        }
+                    });
+
+                    let path_stack: Vec<String> = field_name.split('.').map(String::from).collect();
+                    let container_stack = vec!["Struct:Constant".to_string()];
+
+                    vec![TensorSnapshot::from_closure(
+                        data_fn,
+                        target_dtype,
+                        shape,
+                        path_stack,
+                        container_stack,
+                        ParamId::new(),
+                    )]
                 } else {
                     vec![]
                 }

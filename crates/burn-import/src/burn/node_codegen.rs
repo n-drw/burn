@@ -155,6 +155,8 @@ impl_node_codegen_dispatch! {
     // Other ops
     Cast,
     Clip,
+    DequantizeLinear,
+    MatMulNBits,
     CumSum,
     Dropout,
     Where,

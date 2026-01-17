@@ -77,12 +77,26 @@ impl NodeCodegen for onnx_ir::node::arithmetic::MulNode {
             }
             (ArgType::Tensor(tensor_type), ArgType::Shape(_)) => {
                 let dtype_tokens = tensor_type.dtype.to_tokens();
-                quote! {
-                    #lhs.mul(Tensor::<B, 1, burn::tensor::Int>::from_data_dtype(
-                        burn::tensor::TensorData::from(&#rhs as &[i64]),
-                        &*self.device,
-                        #dtype_tokens
-                    ))
+                let lhs_rank = tensor_type.rank;
+                if lhs_rank == 1 {
+                    quote! {
+                        #lhs.mul(Tensor::<B, 1, burn::tensor::Int>::from_data_dtype(
+                            burn::tensor::TensorData::from(&#rhs as &[i64]),
+                            &*self.device,
+                            #dtype_tokens
+                        ))
+                    }
+                } else {
+                    // Need to unsqueeze the 1D shape tensor to match lhs rank
+                    let num_dims = lhs_rank - 1;
+                    let dims: Vec<isize> = (0..num_dims).map(|i| i as isize).collect();
+                    quote! {
+                        #lhs.mul(Tensor::<B, 1, burn::tensor::Int>::from_data_dtype(
+                            burn::tensor::TensorData::from(&#rhs as &[i64]),
+                            &*self.device,
+                            #dtype_tokens
+                        ).unsqueeze_dims(&[#(#dims),*]))
+                    }
                 }
             }
         };

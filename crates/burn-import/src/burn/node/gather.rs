@@ -73,7 +73,7 @@ fn forward_shape_gather(node: &onnx_ir::gather::GatherNode) -> proc_macro2::Toke
                                     };
                                     #input_shape_name[actual_idx]
                                 })
-                                .collect::<alloc::vec::Vec<_>>()
+                                .collect::<Vec<_>>()
                                 .try_into()
                                 .unwrap();
                         }
@@ -101,7 +101,7 @@ fn forward_shape_gather(node: &onnx_ir::gather::GatherNode) -> proc_macro2::Toke
                                 };
                                 #input_shape_name[actual_idx]
                             })
-                            .collect::<alloc::vec::Vec<_>>()
+                            .collect::<Vec<_>>()
                             .try_into()
                             .unwrap();
                     }
@@ -318,7 +318,7 @@ mod tests {
                     };
                     full_shape[actual_idx]
                 })
-                .collect::<alloc::vec::Vec<_>>()
+                .collect::<Vec<_>>()
                 .try_into()
                 .unwrap();
             selected_shape
@@ -349,7 +349,7 @@ mod tests {
                     };
                     dimensions[actual_idx]
                 })
-                .collect::<alloc::vec::Vec<_>>()
+                .collect::<Vec<_>>()
                 .try_into()
                 .unwrap();
             result_dims
@@ -379,7 +379,7 @@ mod tests {
                     };
                     original[actual_idx]
                 })
-                .collect::<alloc::vec::Vec<_>>()
+                .collect::<Vec<_>>()
                 .try_into()
                 .unwrap();
             reordered
@@ -409,7 +409,7 @@ mod tests {
                     };
                     shape_vec[actual_idx]
                 })
-                .collect::<alloc::vec::Vec<_>>()
+                .collect::<Vec<_>>()
                 .try_into()
                 .unwrap();
             transposed

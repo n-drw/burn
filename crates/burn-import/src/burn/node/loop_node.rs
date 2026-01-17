@@ -182,7 +182,7 @@ impl NodeCodegen for onnx_ir::node::loop_node::LoopNode {
                 );
                 scan_collectors.push(collector_name.clone());
                 scan_init.extend(quote! {
-                    let mut #collector_name = alloc::vec::Vec::new();
+                    let mut #collector_name = Vec::new();
                 });
             }
         }

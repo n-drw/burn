@@ -451,6 +451,14 @@ impl ProcessorRegistry {
         // Special operations
         registry.register(NodeType::Cast, Box::new(crate::node::cast::CastProcessor));
         registry.register(
+            NodeType::DequantizeLinear,
+            Box::new(crate::node::dequantize_linear::DequantizeLinearProcessor),
+        );
+        registry.register(
+            NodeType::MatMulNBits,
+            Box::new(crate::node::matmul_nbits::MatMulNBitsProcessor),
+        );
+        registry.register(
             NodeType::Shape,
             Box::new(crate::node::shape::ShapeProcessor),
         );

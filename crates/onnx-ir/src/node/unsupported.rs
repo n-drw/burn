@@ -37,7 +37,6 @@ define_placeholder_node! {
     ConvTransposeNode,
     DftNode,
     DeformConvNode,
-    DequantizeLinearNode,
     DetNode,
     DynamicQuantizeLinearNode,
     EinsumNode,

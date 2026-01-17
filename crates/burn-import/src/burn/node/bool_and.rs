@@ -38,7 +38,27 @@ impl NodeCodegen for onnx_ir::node::and::AndNode {
             (ArgType::Scalar(_), ArgType::Scalar(_)) => {
                 quote! { #lhs_value && #rhs_value }
             }
-            _ => panic!("And operation requires tensor or scalar inputs"),
+            // Handle mixed Scalar/Tensor cases - broadcast scalar to tensor
+            (ArgType::Scalar(_), ArgType::Tensor(_)) => {
+                // Scalar AND Tensor: if scalar is true, result is tensor; if false, result is all false
+                quote! { {
+                    let shape = #rhs_value.shape();
+                    let device = #rhs_value.device();
+                    #rhs_value.bool_and(Tensor::full(shape, #lhs_value, &device))
+                } }
+            }
+            (ArgType::Tensor(_), ArgType::Scalar(_)) => {
+                // Tensor AND Scalar: if scalar is true, result is tensor; if false, result is all false
+                quote! { {
+                    let shape = #lhs_value.shape();
+                    let device = #lhs_value.device();
+                    #lhs_value.bool_and(Tensor::full(shape, #rhs_value, &device))
+                } }
+            }
+            _ => panic!(
+                "And operation requires tensor or scalar inputs, got lhs: {:?}, rhs: {:?}",
+                lhs.ty, rhs.ty
+            ),
         };
 
         quote! {

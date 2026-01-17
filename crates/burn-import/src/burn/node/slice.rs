@@ -175,9 +175,9 @@ fn generate_tensor_slice(
 
                     return quote! {
                         let #start_data_var = #start_name.to_data();
-                        let #start_vec_var: alloc::vec::Vec<i64> = #start_data_var.iter::<i64>().collect();
+                        let #start_vec_var: Vec<i64> = #start_data_var.iter::<i64>().collect();
                         let #end_data_var = #end_name.to_data();
-                        let #end_vec_var: alloc::vec::Vec<i64> = #end_data_var.iter::<i64>().collect();
+                        let #end_vec_var: Vec<i64> = #end_data_var.iter::<i64>().collect();
                         let #output = #input.slice(s![#(#ranges),*]);
                     };
                 } else {
@@ -227,7 +227,7 @@ fn generate_tensor_slice(
                     extraction_code = quote! {
                         #extraction_code
                         let start_data = #start_name.to_data();
-                        let #start_vec_var: alloc::vec::Vec<i64> = start_data.iter::<i64>().collect();
+                        let #start_vec_var: Vec<i64> = start_data.iter::<i64>().collect();
                     };
                 }
 
@@ -235,7 +235,7 @@ fn generate_tensor_slice(
                     extraction_code = quote! {
                         #extraction_code
                         let end_data = #end_name.to_data();
-                        let #end_vec_var: alloc::vec::Vec<i64> = end_data.iter::<i64>().collect();
+                        let #end_vec_var: Vec<i64> = end_data.iter::<i64>().collect();
                     };
                 }
 
@@ -355,7 +355,7 @@ fn generate_tensor_slice(
 
                     return quote! {
                         let #end_data_var = #end_name.to_data();
-                        let #end_vec_var: alloc::vec::Vec<i64> = #end_data_var.iter::<i64>().collect();
+                        let #end_vec_var: Vec<i64> = #end_data_var.iter::<i64>().collect();
                         let #output = #input.slice(s![#(#range_exprs),*]);
                     };
                 }
@@ -439,7 +439,7 @@ fn generate_tensor_slice(
 
                     return quote! {
                         let #start_data_var = #start_name.to_data();
-                        let #start_vec_var: alloc::vec::Vec<i64> = #start_data_var.iter::<i64>().collect();
+                        let #start_vec_var: Vec<i64> = #start_data_var.iter::<i64>().collect();
                         let #output = #input.slice(s![#(#range_exprs),*]);
                     };
                 }
