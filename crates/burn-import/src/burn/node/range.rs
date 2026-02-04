@@ -66,8 +66,10 @@ impl NodeCodegen for onnx_ir::node::range::RangeNode {
             }
         };
 
+        // Cast to I64 to ensure consistent dtype with other operations
         quote! {
-            let #output = Tensor::arange_step(#start..#limit, #delta as usize, &*self.device);
+            let #output = Tensor::arange_step(#start..#limit, #delta as usize, &*self.device)
+                .cast(burn::tensor::IntDType::I64);
         }
     }
 }

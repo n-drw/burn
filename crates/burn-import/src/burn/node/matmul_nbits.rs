@@ -11,12 +11,17 @@ impl NodeCodegen for onnx_ir::matmul_nbits::MatMulNBitsNode {
 
     fn forward(&self, scope: &mut ScopeAtPosition<'_>) -> TokenStream {
         // MatMulNBits inputs:
-        // 0: A - input tensor [M, K]
-        // 1: B - packed quantized weights (INT4 packed as U8)
-        // 2: scales - quantization scales
+        // 0: A - input tensor [batch, seq, K]
+        // 1: B - packed quantized weights (INT4 packed as U8, stored as float)
+        //        Shape: [N, n_blocks, blob_size] where blob_size = block_size/2
+        // 2: scales - quantization scales [N, n_blocks]
         // 3: zero_points (optional)
         // 4: g_idx (optional)
         // 5: bias (optional)
+        //
+        // The B tensor contains packed 4-bit values: each float represents a U8 byte
+        // containing 2 quantized 4-bit values (high nibble and low nibble).
+        // We need to unpack these before dequantization and matmul.
         
         let a_arg = self.inputs.first().unwrap();
         let b_arg = self.inputs.get(1).unwrap();
@@ -82,68 +87,96 @@ impl NodeCodegen for onnx_ir::matmul_nbits::MatMulNBitsNode {
                 }
             }
         } else {
-            // Symmetric quantization (Q4S) - use native quantized matmul path
-            // Create a quantized tensor from B (packed weights) with scales as qparams
-            //
-            // The key insight: burn-cubecl's matmul checks if inputs have qparams
-            // and uses MatmulInputHandleRef::quantized() for efficient fused matmul
+            // Symmetric quantization (Q4S) - dequantize then matmul
+            // 
+            // B tensor is packed 4-bit: [N, n_blocks, blob_size] where blob_size = block_size/2
+            // Each float value in B represents a packed U8 byte with 2 x 4-bit values:
+            //   high_nibble = floor(x / 16), low_nibble = x % 16
+            // 
+            // For symmetric Q4, values are in range [-8, 7] (signed 4-bit).
+            // After unpacking, we subtract 8 to convert from [0,15] to [-8,7].
+            // Then multiply by scales to dequantize.
             
             if has_bias {
                 let bias_arg = self.inputs.get(5).unwrap();
                 let bias = scope.arg(bias_arg);
                 quote! {
                     // MatMulNBits symmetric Q4S: K=#k, N=#n, block_size=#block_size
-                    // Create quantized tensor and use native quantized matmul
+                    // Dequantize packed 4-bit weights then matmul
                     let #output = {
-                        use burn::tensor::quantization::{QuantScheme, QuantValue, QuantStore, QuantLevel, QuantMode, QuantParam, BlockSize, QuantizationParameters};
+                        // B is [N, n_blocks, blob_size] with packed 4-bit values
+                        // Each float is a packed byte: high = floor(x/16), low = x % 16
+                        let b_packed = #b;
                         
-                        // Define Q4S scheme with block quantization
-                        let scheme = QuantScheme {
-                            value: QuantValue::Q4S,
-                            param: QuantParam::F32,
-                            store: QuantStore::PackedU32(0), // packed along last dim
-                            level: QuantLevel::Block(BlockSize::new([#block_size as u8])),
-                            mode: QuantMode::Symmetric,
-                        };
+                        // Unpack: extract high and low nibbles
+                        let b_floor = b_packed.clone().div_scalar(16.0).floor();
+                        let b_high = b_floor.clone();  // high nibble [0-15]
+                        let b_low = b_packed.sub(b_floor.mul_scalar(16.0));  // low nibble [0-15]
                         
-                        // Create quantization parameters from scales
-                        let qparams = QuantizationParameters { scales: #scales.clone() };
+                        // Interleave low and high: stack along new dim then flatten
+                        // This gives us [N, n_blocks, block_size] (doubled last dim)
+                        let b_unpacked = Tensor::stack::<4>(vec![b_low, b_high], 3)
+                            .flatten::<3>(2, 3);
                         
-                        // Quantize B with the scheme and params
-                        // This creates a QFloat tensor that cubecl can use efficiently
-                        // Note: B is already float (U8 weights are stored as float tensors)
-                        let b_quantized = #b.quantize(&scheme, qparams);
+                        // Center: symmetric Q4 uses zero point of 8, so subtract 8 to get [-8, 7]
+                        let b_centered = b_unpacked.sub_scalar(8.0);
                         
-                        // Matmul with quantized weights - cubecl uses fused kernel
-                        #a.matmul(b_quantized).add(#bias)
+                        // Reshape to [N, K] where K = n_blocks * block_size
+                        let b_flat = b_centered.flatten::<2>(1, 2);  // [N, K]
+                        
+                        // Dequantize: multiply by scales
+                        // scales is 1D [N * n_blocks], reshape to [N, n_blocks] then broadcast to [N, K]
+                        let n_blocks = #k / #block_size;
+                        let scales_2d = #scales.reshape([#n, n_blocks]);  // [N, n_blocks]
+                        let scales_expanded = scales_2d.unsqueeze_dim::<3>(2)
+                            .expand([#n, n_blocks, #block_size])
+                            .flatten::<2>(1, 2);  // [N, K]
+                        let b_dequant = b_flat.mul(scales_expanded);
+                        
+                        // Transpose to [K, N] and unsqueeze for batch matmul
+                        let b_weight = b_dequant.transpose().unsqueeze::<3>();  // [1, K, N]
+                        
+                        #a.matmul(b_weight).add(#bias)
                     };
                 }
             } else {
                 quote! {
                     // MatMulNBits symmetric Q4S: K=#k, N=#n, block_size=#block_size
-                    // Create quantized tensor and use native quantized matmul
+                    // Dequantize packed 4-bit weights then matmul
                     let #output = {
-                        use burn::tensor::quantization::{QuantScheme, QuantValue, QuantStore, QuantLevel, QuantMode, QuantParam, BlockSize, QuantizationParameters};
+                        // B is [N, n_blocks, blob_size] with packed 4-bit values
+                        // Each float is a packed byte: high = floor(x/16), low = x % 16
+                        let b_packed = #b;
                         
-                        // Define Q4S scheme with block quantization
-                        let scheme = QuantScheme {
-                            value: QuantValue::Q4S,
-                            param: QuantParam::F32,
-                            store: QuantStore::PackedU32(0), // packed along last dim
-                            level: QuantLevel::Block(BlockSize::new([#block_size as u8])),
-                            mode: QuantMode::Symmetric,
-                        };
+                        // Unpack: extract high and low nibbles
+                        let b_floor = b_packed.clone().div_scalar(16.0).floor();
+                        let b_high = b_floor.clone();  // high nibble [0-15]
+                        let b_low = b_packed.sub(b_floor.mul_scalar(16.0));  // low nibble [0-15]
                         
-                        // Create quantization parameters from scales
-                        let qparams = QuantizationParameters { scales: #scales.clone() };
+                        // Interleave low and high: stack along new dim then flatten
+                        // This gives us [N, n_blocks, block_size] (doubled last dim)
+                        let b_unpacked = Tensor::stack::<4>(vec![b_low, b_high], 3)
+                            .flatten::<3>(2, 3);
                         
-                        // Quantize B with the scheme and params
-                        // This creates a QFloat tensor that cubecl can use efficiently
-                        // Note: B is already float (U8 weights are stored as float tensors)
-                        let b_quantized = #b.quantize(&scheme, qparams);
+                        // Center: symmetric Q4 uses zero point of 8, so subtract 8 to get [-8, 7]
+                        let b_centered = b_unpacked.sub_scalar(8.0);
                         
-                        // Matmul with quantized weights - cubecl uses fused kernel
-                        #a.matmul(b_quantized)
+                        // Reshape to [N, K] where K = n_blocks * block_size
+                        let b_flat = b_centered.flatten::<2>(1, 2);  // [N, K]
+                        
+                        // Dequantize: multiply by scales
+                        // scales is 1D [N * n_blocks], reshape to [N, n_blocks] then broadcast to [N, K]
+                        let n_blocks = #k / #block_size;
+                        let scales_2d = #scales.reshape([#n, n_blocks]);  // [N, n_blocks]
+                        let scales_expanded = scales_2d.unsqueeze_dim::<3>(2)
+                            .expand([#n, n_blocks, #block_size])
+                            .flatten::<2>(1, 2);  // [N, K]
+                        let b_dequant = b_flat.mul(scales_expanded);
+                        
+                        // Transpose to [K, N] and unsqueeze for batch matmul
+                        let b_weight = b_dequant.transpose().unsqueeze::<3>();  // [1, K, N]
+                        
+                        #a.matmul(b_weight)
                     };
                 }
             }

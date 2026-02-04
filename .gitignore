@@ -20,3 +20,8 @@ uv.lock
 # Nix direnv
 .envrc
 .direnv
+
+# Generated model files
+*.bpk
+--out-dir/
+-o/
