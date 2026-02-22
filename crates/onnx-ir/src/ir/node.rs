@@ -278,6 +278,7 @@ define_node_enum! {
     BatchNormalization => batch_norm::BatchNormalizationNode,
     InstanceNormalization => instance_norm::InstanceNormalizationNode,
     LayerNormalization => layer_norm::LayerNormalizationNode,
+    SimplifiedLayerNormalization => layer_norm::LayerNormalizationNode,
     GroupNormalization => group_norm::GroupNormalizationNode,
 
     // DROPOUT & REGULARIZATION
@@ -286,6 +287,9 @@ define_node_enum! {
     // LINEAR & SPECIAL LAYERS
     Linear => linear::LinearNode,
     Attention => attention::AttentionNode,
+    GroupQueryAttention => group_query_attention::GroupQueryAttentionNode,
+    SkipSimplifiedLayerNormalization => skip_simplified_layer_norm::SkipSimplifiedLayerNormNode,
+    RotaryEmbedding => rotary_embedding::RotaryEmbeddingNode,
 
     // CONSTANT GENERATION
     Constant => constant::ConstantNode,
@@ -367,7 +371,6 @@ define_node_enum! {
     RegexFullMatch => unsupported::RegexFullMatchNode,
     ReverseSequence => unsupported::ReverseSequenceNode,
     RoiAlign => unsupported::RoiAlignNode,
-    RotaryEmbedding => unsupported::RotaryEmbeddingNode,
     SequenceAt => unsupported::SequenceAtNode,
     SequenceConstruct => unsupported::SequenceConstructNode,
     SequenceEmpty => unsupported::SequenceEmptyNode,

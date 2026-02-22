@@ -300,6 +300,10 @@ impl ProcessorRegistry {
             Box::new(crate::node::layer_norm::LayerNormProcessor),
         );
         registry.register(
+            NodeType::SimplifiedLayerNormalization,
+            Box::new(crate::node::layer_norm::LayerNormProcessor),
+        );
+        registry.register(
             NodeType::GroupNormalization,
             Box::new(crate::node::group_norm::GroupNormProcessor),
         );
@@ -547,6 +551,18 @@ impl ProcessorRegistry {
         registry.register(
             NodeType::Attention,
             Box::new(crate::node::attention::AttentionProcessor),
+        );
+        registry.register(
+            NodeType::GroupQueryAttention,
+            Box::new(crate::node::group_query_attention::GroupQueryAttentionProcessor),
+        );
+        registry.register(
+            NodeType::SkipSimplifiedLayerNormalization,
+            Box::new(crate::node::skip_simplified_layer_norm::SkipSimplifiedLayerNormProcessor),
+        );
+        registry.register(
+            NodeType::RotaryEmbedding,
+            Box::new(crate::node::rotary_embedding::RotaryEmbeddingProcessor),
         );
         registry.register(
             NodeType::BitShift,

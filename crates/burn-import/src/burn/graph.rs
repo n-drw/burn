@@ -281,7 +281,9 @@ impl BurnGraph {
                 /// Load model weights from a burnpack file.
                 pub fn from_file(file: &str, device: &B::Device) -> Self {
                     let mut model = Self::new(device);
-                    let mut store = BurnpackStore::from_file(file);
+                    let bytes = std::fs::read(file).expect("Failed to read burnpack file");
+                    let burn_bytes = burn::tensor::Bytes::from_bytes_vec(bytes);
+                    let mut store = BurnpackStore::from_bytes(Some(burn_bytes));
                     model.load_from(&mut store).expect("Failed to load burnpack file");
                     model
                 }

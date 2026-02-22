@@ -38,6 +38,8 @@ pub struct LayerNormConfig {
     pub full_precision: bool,
     /// Whether the ONNX model includes a bias (beta) parameter
     pub has_bias: bool,
+    /// Whether this is SimplifiedLayerNormalization (RMSNorm) instead of LayerNorm
+    pub is_rms_norm: bool,
 }
 
 impl LayerNormConfig {
@@ -76,7 +78,7 @@ impl NodeProcessor for LayerNormProcessor {
 
     fn spec(&self) -> NodeSpec {
         NodeSpec {
-            min_opset: 17,
+            min_opset: 1,
             max_opset: None,
             inputs: InputSpec::AtLeast(2),
             outputs: OutputSpec::Exact(1),
@@ -171,21 +173,29 @@ impl NodeProcessor for LayerNormProcessor {
         let full_precision = stash_type == 1;
         // Check if bias (3rd input) is present in the ONNX model
         let has_bias = node.inputs.len() > 2;
-        let config = LayerNormConfig::new(num_features, epsilon as f64, full_precision, has_bias);
+        // SimplifiedLayerNormalization is RMSNorm (no mean subtraction)
+        let is_rms_norm = node.node_type == crate::ir::NodeType::SimplifiedLayerNormalization;
+        let config = LayerNormConfig::new(num_features, epsilon as f64, full_precision, has_bias, is_rms_norm);
         Ok(config)
     }
 
     fn build_node(&self, builder: RawNode, opset: usize) -> Node {
+        use crate::ir::NodeType;
         let config = self
             .extract_config(&builder, opset)
             .expect("Config extraction failed");
 
-        Node::LayerNormalization(LayerNormalizationNode {
-            name: builder.name,
-            inputs: builder.inputs,
-            outputs: builder.outputs,
+        let node = LayerNormalizationNode {
+            name: builder.name.clone(),
+            inputs: builder.inputs.clone(),
+            outputs: builder.outputs.clone(),
             config,
-        })
+        };
+
+        match builder.node_type {
+            NodeType::SimplifiedLayerNormalization => Node::SimplifiedLayerNormalization(node),
+            _ => Node::LayerNormalization(node),
+        }
     }
 }
 
@@ -201,8 +211,8 @@ mod tests {
         stash_type: i64,
         num_features: usize,
     ) -> TestNodeBuilder {
-        let weight_data = vec![1.0; num_features]; // Not important for the test
-        let bias_data = vec![0.0; num_features]; // Not important for the test
+        let weight_data = vec![1.0; num_features];
+        let bias_data = vec![0.0; num_features];
 
         TestNodeBuilder::new(NodeType::LayerNormalization, "test_layernorm")
             .input_tensor_f32("X", 3, None)

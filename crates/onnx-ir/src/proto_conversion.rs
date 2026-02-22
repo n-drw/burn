@@ -711,7 +711,8 @@ pub fn convert_node_proto(node: &NodeProto, graph_data: &GraphState) -> RawNode 
     // Use base_path from graph_data for external data resolution in tensor attributes
     let attrs = convert_vec_attrs_proto_with_base_path(node.attribute.clone(), graph_data.base_path());
 
-    let node_type = NodeType::from_str(&node.op_type).expect("Unknown node type");
+    let node_type = NodeType::from_str(&node.op_type)
+        .unwrap_or_else(|_| panic!("Unknown node type: '{}' (domain: '{}')", node.op_type, node.domain));
 
     RawNode {
         node_type,

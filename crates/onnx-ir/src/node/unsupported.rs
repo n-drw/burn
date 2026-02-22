@@ -70,7 +70,6 @@ define_placeholder_node! {
     RegexFullMatchNode,
     ReverseSequenceNode,
     RoiAlignNode,
-    RotaryEmbeddingNode,
     ScatterNode,
     ScatterElementsNode,
     ScatterNDNode,

@@ -75,14 +75,26 @@ impl NodeCodegen for onnx_ir::node::arithmetic::SubNode {
                     ).sub(#rhs)
                 }
             }
-            (ArgType::Tensor(tensor_type), ArgType::Shape(_)) => {
-                let dtype_tokens = tensor_type.dtype.to_tokens();
-                quote! {
-                    #lhs.sub(Tensor::<B, 1, burn::tensor::Int>::from_data_dtype(
-                        burn::tensor::TensorData::from(&#rhs as &[i64]),
-                        &*self.device,
-                        #dtype_tokens
-                    ))
+            (ArgType::Tensor(_tensor_type), ArgType::Shape(_)) => {
+                let lhs_rank = _tensor_type.rank;
+                if lhs_rank <= 1 {
+                    quote! {
+                        #lhs.sub(Tensor::<B, 1, burn::tensor::Int>::from_data_dtype(
+                            burn::tensor::TensorData::from(&#rhs.iter().map(|&x| x as i32).collect::<Vec<i32>>() as &[i32]),
+                            &*self.device,
+                            burn::tensor::DType::I32,
+                        ))
+                    }
+                } else {
+                    let num_dims = lhs_rank - 1;
+                    let dims: Vec<isize> = (0..num_dims).map(|i| i as isize).collect();
+                    quote! {
+                        #lhs.sub(Tensor::<B, 1, burn::tensor::Int>::from_data_dtype(
+                            burn::tensor::TensorData::from(&#rhs.iter().map(|&x| x as i32).collect::<Vec<i32>>() as &[i32]),
+                            &*self.device,
+                            burn::tensor::DType::I32,
+                        ).unsqueeze_dims(&[#(#dims),*]))
+                    }
                 }
             }
         };

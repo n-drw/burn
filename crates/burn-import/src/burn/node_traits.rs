@@ -42,11 +42,11 @@ impl From<onnx_ir::ir::DType> for TensorKind {
         use onnx_ir::ir::DType;
 
         match dtype {
-            DType::F32 => TensorKind::Float,
+            DType::F16 | DType::F32 => TensorKind::Float,
             DType::F64 => TensorKind::Float,
             DType::I32 => TensorKind::Int,
             DType::I64 => TensorKind::Int,
-            DType::I8 | DType::U8 => TensorKind::Int,
+            DType::I8 | DType::U8 | DType::U16 => TensorKind::Int,
             DType::Bool => TensorKind::Bool,
             _ => panic!("Unsupported tensor type"),
         }

@@ -103,80 +103,68 @@ impl NodeCodegen for onnx_ir::matmul_nbits::MatMulNBitsNode {
                 quote! {
                     // MatMulNBits symmetric Q4S: K=#k, N=#n, block_size=#block_size
                     // Dequantize packed 4-bit weights then matmul
+                    // All computation done in F32 to avoid F16/F32 mixing NaN
                     let #output = {
-                        // B is [N, n_blocks, blob_size] with packed 4-bit values
-                        // Each float is a packed byte: high = floor(x/16), low = x % 16
-                        let b_packed = #b;
+                        let a_input = #a;
+                        let out_dtype = a_input.dtype();
+                        let a_f32 = a_input.cast(burn::tensor::DType::F32);
                         
-                        // Unpack: extract high and low nibbles
+                        let b_packed = #b.cast(burn::tensor::DType::F32);
+                        
                         let b_floor = b_packed.clone().div_scalar(16.0).floor();
-                        let b_high = b_floor.clone();  // high nibble [0-15]
-                        let b_low = b_packed.sub(b_floor.mul_scalar(16.0));  // low nibble [0-15]
+                        let b_high = b_floor.clone();
+                        let b_low = b_packed.sub(b_floor.mul_scalar(16.0));
                         
-                        // Interleave low and high: stack along new dim then flatten
-                        // This gives us [N, n_blocks, block_size] (doubled last dim)
                         let b_unpacked = Tensor::stack::<4>(vec![b_low, b_high], 3)
                             .flatten::<3>(2, 3);
-                        
-                        // Center: symmetric Q4 uses zero point of 8, so subtract 8 to get [-8, 7]
                         let b_centered = b_unpacked.sub_scalar(8.0);
+                        let b_flat = b_centered.flatten::<2>(1, 2);
                         
-                        // Reshape to [N, K] where K = n_blocks * block_size
-                        let b_flat = b_centered.flatten::<2>(1, 2);  // [N, K]
-                        
-                        // Dequantize: multiply by scales
-                        // scales is 1D [N * n_blocks], reshape to [N, n_blocks] then broadcast to [N, K]
                         let n_blocks = #k / #block_size;
-                        let scales_2d = #scales.reshape([#n, n_blocks]);  // [N, n_blocks]
+                        let scales_2d = #scales.cast(burn::tensor::DType::F32)
+                            .reshape([#n, n_blocks]);
                         let scales_expanded = scales_2d.unsqueeze_dim::<3>(2)
                             .expand([#n, n_blocks, #block_size])
-                            .flatten::<2>(1, 2);  // [N, K]
+                            .flatten::<2>(1, 2);
                         let b_dequant = b_flat.mul(scales_expanded);
                         
-                        // Transpose to [K, N] and unsqueeze for batch matmul
-                        let b_weight = b_dequant.transpose().unsqueeze::<3>();  // [1, K, N]
+                        let b_weight = b_dequant.transpose().unsqueeze::<3>();
                         
-                        #a.matmul(b_weight).add(#bias)
+                        a_f32.matmul(b_weight).add(#bias.cast(burn::tensor::DType::F32)).clamp(-65504.0, 65504.0).cast(out_dtype)
                     };
                 }
             } else {
                 quote! {
                     // MatMulNBits symmetric Q4S: K=#k, N=#n, block_size=#block_size
                     // Dequantize packed 4-bit weights then matmul
+                    // All computation done in F32 to avoid F16/F32 mixing NaN
                     let #output = {
-                        // B is [N, n_blocks, blob_size] with packed 4-bit values
-                        // Each float is a packed byte: high = floor(x/16), low = x % 16
-                        let b_packed = #b;
+                        let a_input = #a;
+                        let out_dtype = a_input.dtype();
+                        let a_f32 = a_input.cast(burn::tensor::DType::F32);
                         
-                        // Unpack: extract high and low nibbles
+                        let b_packed = #b.cast(burn::tensor::DType::F32);
+                        
                         let b_floor = b_packed.clone().div_scalar(16.0).floor();
-                        let b_high = b_floor.clone();  // high nibble [0-15]
-                        let b_low = b_packed.sub(b_floor.mul_scalar(16.0));  // low nibble [0-15]
+                        let b_high = b_floor.clone();
+                        let b_low = b_packed.sub(b_floor.mul_scalar(16.0));
                         
-                        // Interleave low and high: stack along new dim then flatten
-                        // This gives us [N, n_blocks, block_size] (doubled last dim)
                         let b_unpacked = Tensor::stack::<4>(vec![b_low, b_high], 3)
                             .flatten::<3>(2, 3);
-                        
-                        // Center: symmetric Q4 uses zero point of 8, so subtract 8 to get [-8, 7]
                         let b_centered = b_unpacked.sub_scalar(8.0);
+                        let b_flat = b_centered.flatten::<2>(1, 2);
                         
-                        // Reshape to [N, K] where K = n_blocks * block_size
-                        let b_flat = b_centered.flatten::<2>(1, 2);  // [N, K]
-                        
-                        // Dequantize: multiply by scales
-                        // scales is 1D [N * n_blocks], reshape to [N, n_blocks] then broadcast to [N, K]
                         let n_blocks = #k / #block_size;
-                        let scales_2d = #scales.reshape([#n, n_blocks]);  // [N, n_blocks]
+                        let scales_2d = #scales.cast(burn::tensor::DType::F32)
+                            .reshape([#n, n_blocks]);
                         let scales_expanded = scales_2d.unsqueeze_dim::<3>(2)
                             .expand([#n, n_blocks, #block_size])
-                            .flatten::<2>(1, 2);  // [N, K]
+                            .flatten::<2>(1, 2);
                         let b_dequant = b_flat.mul(scales_expanded);
                         
-                        // Transpose to [K, N] and unsqueeze for batch matmul
-                        let b_weight = b_dequant.transpose().unsqueeze::<3>();  // [1, K, N]
+                        let b_weight = b_dequant.transpose().unsqueeze::<3>();
                         
-                        #a.matmul(b_weight)
+                        a_f32.matmul(b_weight).clamp(-65504.0, 65504.0).cast(out_dtype)
                     };
                 }
             }

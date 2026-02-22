@@ -149,8 +149,18 @@ impl_node_codegen_dispatch! {
     // Normalization ops
     BatchNormalization,
     LayerNormalization,
+    SimplifiedLayerNormalization,
     GroupNormalization,
     InstanceNormalization,
+
+    // Attention ops
+    GroupQueryAttention,
+
+    // Positional encoding ops
+    RotaryEmbedding,
+
+    // Fused normalization ops
+    SkipSimplifiedLayerNormalization,
 
     // Other ops
     Cast,
